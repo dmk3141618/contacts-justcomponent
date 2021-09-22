@@ -22,3 +22,6 @@ So eslint@^7.32.0 installed again make error. But remove and reinstall packages 
 rm -rf node_modules
 rm yarn.lock
 yarn
+
+yarn add react-router-dom
+yarn add @types/react-router-dom --dev
