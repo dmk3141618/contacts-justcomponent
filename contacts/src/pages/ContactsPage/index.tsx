@@ -1,4 +1,4 @@
-import React, {useCallback, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {RouteComponentProps} from 'react-router-dom';
 import Button from '~/common/component/Button';
 import Icon from '~/common/component/Icon';
@@ -8,6 +8,9 @@ import {useForm} from 'react-hook-form';
 import * as yup from 'yup';
 import {yupResolver} from '@hookform/resolvers/yup';
 import styled from 'styled-components';
+import {v1 as uuidv1} from 'uuid';
+import {IContact} from '~/typings/db';
+import useLocalStorage from '~/common/hook/useLocalStorage';
 
 const PageWrap = styled.div`
   display: flex;
@@ -23,6 +26,7 @@ const AppBlock = styled.div`
   margin-top: 4rem;
   border: 1px solid black;
   padding: 1rem;
+  min-width: 400px;
 `;
 
 const Title = styled.div`
@@ -84,6 +88,7 @@ const Controls = styled.div`
       display: inline-flex;
       flex-direction: row;
       align-items: center;
+      cursor: pointer;
       .iconWrap {
         display: inline-flex;
         align-items: center;
@@ -95,6 +100,17 @@ const Controls = styled.div`
       }
       .text {
         margin-left: 5px;
+        color: ${props => props.theme.color.grayLight};
+      }
+      &.active {
+        .text {
+          color: ${props => props.theme.color.grayBlack};
+        }
+      }
+      &:hover {
+        .text {
+          color: ${props => props.theme.color.grayBase};
+        }
       }
     }
   }
@@ -113,6 +129,7 @@ const Controls = styled.div`
 
 const ContactListWrap = styled.div`
   width: 100%;
+  margin-top: 2rem;
 `;
 const ContactList = styled.ul`
   width: 100%;
@@ -168,6 +185,9 @@ const ContactListItem = styled.li`
       & > * + * {
         margin-left: 0.5rem;
       }
+      .favorite {
+        cursor: pointer;
+      }
     }
   }
 `;
@@ -215,33 +235,101 @@ const ContactForm = styled.div`
 interface ContactFormValuesType {
   name: string;
   email: string;
-  phone: string;
+  phone?: string;
+}
+
+type Action =
+  | {type: 'INIT'; contacts: IContact[]}
+  | {type: 'CREATE'; contact: IContact}
+  | {type: 'UPDATE'; contact: IContact}
+  | {type: 'DELETE'; id: string}
+  | {type: 'TOGGLE_FAVORITE'; id: string};
+function contactsReducer(state: IContact[], action: Action): IContact[] {
+  switch (action.type) {
+    case 'INIT':
+      return [...action.contacts];
+    case 'CREATE':
+      return state.concat(action.contact);
+    case 'UPDATE':
+      const foundIndex = state.findIndex(contact => contact.id === action.contact.id);
+      if (foundIndex === -1) {
+        return state;
+      }
+      return state
+        .slice(0, foundIndex)
+        .concat({
+          id: state[foundIndex].id,
+          name: action.contact.name,
+          email: action.contact.email,
+          phone: action.contact.phone,
+          isFavorite: state[foundIndex].isFavorite,
+        })
+        .concat(state.slice(foundIndex + 1));
+    case 'DELETE':
+      return state.filter(contact => contact.id !== action.id);
+    case 'TOGGLE_FAVORITE':
+      return state.map(contact =>
+        contact.id === action.id ? {...contact, isFavorite: !contact.isFavorite} : contact,
+      );
+    default:
+      throw new Error('Unhandled action');
+  }
 }
 
 type Props = RouteComponentProps;
 function ContactsPage({}: Props) {
+  const [contactsState, dispatch] = useReducer(contactsReducer, []);
+  const [storedValue, setValue] = useLocalStorage('contacts', contactsState);
+
+  // filter
+  const [isShowOnlyFavorites, setIsShowOnlyFavorites] = useState<boolean>(false);
+  const onShowOnlyFavoritesToggle = useCallback(() => {
+    setIsShowOnlyFavorites(prev => !prev);
+  }, []);
+
+  useEffect(() => {
+    dispatch({
+      type: 'INIT',
+      contacts: storedValue ?? [],
+    });
+  }, []);
+
+  useEffect(() => {
+    setValue(contactsState);
+  }, [contactsState, setValue]);
+
+  const contacts = useMemo(() => {
+    if (isShowOnlyFavorites) {
+      return contactsState.filter(contact => contact.isFavorite);
+    } else {
+      return contactsState;
+    }
+  }, [contactsState, isShowOnlyFavorites]);
+
+  // delete
+  const [selectedContact, setSelectedContact] = useState<IContact | null>(null);
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState<boolean>(false);
-  const onClickDeleteConfirm = useCallback(() => {
-    setShowDeleteConfirmDialog(true);
-  }, []);
+  const onClickDeleteConfirm = useCallback(
+    (contact: IContact) => () => {
+      setSelectedContact(contact);
+      setShowDeleteConfirmDialog(true);
+    },
+    [],
+  );
   const onConfirmDeleteConfirm = useCallback(() => {
+    if (selectedContact) {
+      dispatch({type: 'DELETE', id: selectedContact.id});
+    }
+    setSelectedContact(null);
     setShowDeleteConfirmDialog(false);
-  }, []);
+  }, [dispatch, selectedContact]);
   const onCancelDeleteConfirm = useCallback(() => {
+    setSelectedContact(null);
     setShowDeleteConfirmDialog(false);
   }, []);
 
+  // create
   const contactForm = useRef<HTMLFormElement>(null);
-  const [showContactFormDialog, setShowContactFormDialog] = useState<boolean>(false);
-  const onClickContactForm = useCallback(() => {
-    setShowContactFormDialog(true);
-  }, []);
-  const onConfirmContactForm = useCallback(() => {
-    contactForm.current?.requestSubmit();
-  }, []);
-  const onCancelContactForm = useCallback(() => {
-    setShowContactFormDialog(false);
-  }, []);
   const contactFormValidation = yup.object().shape({
     name: yup.string().required('Required'),
     email: yup.string().email('Invalid email address').required('Required'),
@@ -259,13 +347,68 @@ function ContactsPage({}: Props) {
     register,
     formState: {errors},
     handleSubmit,
+    reset: resetContactForm,
+    setValue: setValueContactForm,
   } = useForm<ContactFormValuesType>({
     resolver: yupResolver(contactFormValidation),
     mode: 'onBlur',
   });
+  const [showContactFormDialog, setShowContactFormDialog] = useState<boolean>(false);
+  const onClickAddContactForm = useCallback(() => {
+    setShowContactFormDialog(true);
+  }, []);
+  const onConfirmContactForm = useCallback(() => {
+    contactForm.current?.requestSubmit();
+  }, []);
+  const onCancelContactForm = useCallback(() => {
+    setShowContactFormDialog(false);
+    setSelectedContact(null);
+    resetContactForm();
+  }, [resetContactForm]);
   const onSubmitContactForm = handleSubmit((data: ContactFormValuesType) => {
-    console.log(data);
+    if (selectedContact) {
+      const contact: IContact = {
+        id: selectedContact.id,
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        isFavorite: selectedContact.isFavorite,
+      };
+      dispatch({type: 'UPDATE', contact});
+    } else {
+      const contact: IContact = {
+        id: uuidv1(),
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        isFavorite: false,
+      };
+      dispatch({type: 'CREATE', contact});
+    }
+    setShowContactFormDialog(false);
+    setSelectedContact(null);
+    resetContactForm();
   });
+
+  // edit
+  const onClickEditContactForm = useCallback(
+    (contact: IContact) => () => {
+      setSelectedContact(contact);
+      setValueContactForm('name', contact.name);
+      setValueContactForm('email', contact.email);
+      setValueContactForm('phone', contact.phone);
+      setShowContactFormDialog(true);
+    },
+    [setValueContactForm],
+  );
+
+  // favorite
+  const onContactFavoriteToggle = useCallback(
+    (contact: IContact) => () => {
+      dispatch({type: 'TOGGLE_FAVORITE', id: contact.id});
+    },
+    [dispatch],
+  );
 
   return (
     <PageWrap>
@@ -277,61 +420,83 @@ function ContactsPage({}: Props) {
           <div className="controlInfosWrap">
             <div className="controlTotal">
               <label>Total</label>
-              <span>1124</span>
+              <span>{contacts.length}</span>
             </div>
             {/*<div className="controlSortBy">*/}
             {/*  <label>Sort By</label>*/}
             {/*  <span>created</span>*/}
             {/*</div>*/}
-            <div className="controlFavorites">
-              <div className="iconWrap">
-                <Icon className="icon" icon={'heartBlank'} />
+            {isShowOnlyFavorites && (
+              <div className="controlFavorites active" onClick={onShowOnlyFavoritesToggle}>
+                <div className="iconWrap">
+                  <Icon className="icon" icon={'heartFill'} />
+                </div>
+                <div className="text">Show Only Favorites</div>
               </div>
-              <div className="text">Show Only Favorites</div>
-            </div>
+            )}
+            {!isShowOnlyFavorites && (
+              <div className="controlFavorites" onClick={onShowOnlyFavoritesToggle}>
+                <div className="iconWrap">
+                  <Icon className="icon" icon={'heartBlank'} />
+                </div>
+                <div className="text">Show Only Favorites</div>
+              </div>
+            )}
           </div>
           <div className="controlBtnsWrap">
-            <Button size={'medium'} onClick={onClickContactForm}>
+            <Button size={'medium'} onClick={onClickAddContactForm}>
               Add Contact
             </Button>
           </div>
         </Controls>
         <ContactListWrap>
-          <ContactList>
-            <ContactListItem>
-              <div className="listItemContent">
-                <div className="listItemContentFieldsWrap">
-                  <div className="listItemContentField">
-                    <label>name</label>
-                    <span>Hong Gil Dong</span>
+          {!!contacts.length && (
+            <ContactList>
+              {contacts.map(item => (
+                <ContactListItem key={item.id}>
+                  <div className="listItemContent">
+                    <div className="listItemContentFieldsWrap">
+                      <div className="listItemContentField">
+                        <label>name</label>
+                        <span>{item.name}</span>
+                      </div>
+                      <div className="listItemContentField">
+                        <label>email</label>
+                        <span>{item.email}</span>
+                      </div>
+                      {!!item?.phone && (
+                        <div className="listItemContentField">
+                          <label>phone</label>
+                          <span>{item.phone}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="listItemBtnsWrap">
+                      <Button size={'small'} outline={true} onClick={onClickEditContactForm(item)}>
+                        Edit
+                      </Button>
+                      <Button size={'small'} outline={true} onClick={onClickDeleteConfirm(item)}>
+                        Delete
+                      </Button>
+                      <div className="favorite">
+                        {item.isFavorite ? (
+                          <Icon icon={'heartFill'} onClick={onContactFavoriteToggle(item)} />
+                        ) : (
+                          <Icon icon={'heartBlank'} onClick={onContactFavoriteToggle(item)} />
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="listItemContentField">
-                    <label>email</label>
-                    <span>test@gmail.com</span>
-                  </div>
-                  <div className="listItemContentField">
-                    <label>phone</label>
-                    <span>01012340987</span>
-                  </div>
-                </div>
-                <div className="listItemBtnsWrap">
-                  <Button size={'small'} outline={true}>
-                    Edit
-                  </Button>
-                  <Button size={'small'} outline={true} onClick={onClickDeleteConfirm}>
-                    Delete
-                  </Button>
-                  <div>
-                    <Icon icon={'heartFill'} />
-                  </div>
-                </div>
-              </div>
-            </ContactListItem>
-          </ContactList>
-          <ContactListEmpty>
-            <div className="emptyTitle">No Contact</div>
-            <div className="emptyText">Will you add a new contact?</div>
-          </ContactListEmpty>
+                </ContactListItem>
+              ))}
+            </ContactList>
+          )}
+          {!contacts.length && (
+            <ContactListEmpty>
+              <div className="emptyTitle">No Contact</div>
+              <div className="emptyText">Will you add a new contact?</div>
+            </ContactListEmpty>
+          )}
         </ContactListWrap>
       </AppBlock>
       <Dialog
