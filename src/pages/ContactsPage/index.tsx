@@ -290,7 +290,7 @@ function ContactsPage({}: Props) {
   useEffect(() => {
     dispatch({
       type: 'INIT',
-      contacts: storedValue ?? [],
+      contacts: Array.isArray(storedValue) ? storedValue : [],
     });
   }, []);
 
