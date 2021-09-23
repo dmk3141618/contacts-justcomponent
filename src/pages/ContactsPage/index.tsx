@@ -279,7 +279,7 @@ function contactsReducer(state: IContact[], action: Action): IContact[] {
 type Props = RouteComponentProps;
 function ContactsPage({}: Props) {
   const [contactsState, dispatch] = useReducer(contactsReducer, []);
-  const [storedValue, setValue] = useLocalStorage('contacts', contactsState);
+  const [storedValue, setValue] = useLocalStorage('contactsforjustcomponent', contactsState);
 
   // filter
   const [isShowOnlyFavorites, setIsShowOnlyFavorites] = useState<boolean>(false);
@@ -290,7 +290,7 @@ function ContactsPage({}: Props) {
   useEffect(() => {
     dispatch({
       type: 'INIT',
-      contacts: Array.isArray(storedValue) ? storedValue : [],
+      contacts: storedValue ?? [],
     });
   }, []);
 
