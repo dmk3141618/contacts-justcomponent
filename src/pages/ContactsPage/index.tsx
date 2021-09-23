@@ -281,6 +281,9 @@ function ContactsPage({}: Props) {
   const [contactsState, dispatch] = useReducer(contactsReducer, []);
   const [storedValue, setValue] = useLocalStorage('contactsforjustcomponent', contactsState);
 
+  // contactForm title (add or edit)
+  const [contactFormTitle, setContactFormTitle] = useState<string>('Add a new contact');
+
   // filter
   const [isShowOnlyFavorites, setIsShowOnlyFavorites] = useState<boolean>(false);
   const onShowOnlyFavoritesToggle = useCallback(() => {
@@ -355,6 +358,7 @@ function ContactsPage({}: Props) {
   });
   const [showContactFormDialog, setShowContactFormDialog] = useState<boolean>(false);
   const onClickAddContactForm = useCallback(() => {
+    setContactFormTitle('Add a new contact');
     setShowContactFormDialog(true);
   }, []);
   const onConfirmContactForm = useCallback(() => {
@@ -393,6 +397,7 @@ function ContactsPage({}: Props) {
   // edit
   const onClickEditContactForm = useCallback(
     (contact: IContact) => () => {
+      setContactFormTitle('Edit a contact');
       setSelectedContact(contact);
       setValueContactForm('name', contact.name);
       setValueContactForm('email', contact.email);
@@ -510,7 +515,7 @@ function ContactsPage({}: Props) {
         Are you sure to delete?
       </Dialog>
       <DialogFull
-        title="Add new contact"
+        title={contactFormTitle}
         confirmText="Confirm"
         cancelText="Cancel"
         onConfirm={onConfirmContactForm}
